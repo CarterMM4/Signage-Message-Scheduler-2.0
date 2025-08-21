@@ -51,6 +51,7 @@
     .issues{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto}
     .issue{background:#2b1f1f;border:1px solid #5d2b2b;padding:8px;border-radius:10px}
     .issue.ok{background:#1f2b21;border-color:#2b5d39}
+    .diag{font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; color:#a5b1d8; padding:6px 10px}
   </style>
 </head>
 <body>
@@ -92,6 +93,7 @@
           </select>
           <button class="btn" id="btnExportXLSX">Export XLSX</button>
         </div>
+        <div class="diag" id="diag"></div>
       </section>
 
       <section class="section">
@@ -119,6 +121,7 @@
           <button class="btn" id="btnScale">Set Scale</button>
           <div class="inline" id="pinPalette"></div>
           <button class="btn" id="btnClearPins">Clear Pins</button>
+          <button class="btn" id="btnLoadSample">Load Sample PDF</button>
         </div>
         <div id="stage">
           <canvas id="pageCanvas"></canvas>
@@ -149,7 +152,21 @@
     </main>
   </div>
 
-  <!-- Only your app script; it will self-load all libraries -->
+  <!-- Pin the **UMD** pdf.js v2 build (stable on GitHub Pages) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    // Point the worker to the same version (important!)
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+    }
+  </script>
+
+  <!-- OCR + XLSX (optional; used by app.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Your app code -->
   <script defer src="./app.js"></script>
 </body>
 </html>
