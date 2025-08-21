@@ -52,48 +52,6 @@
     .issue{background:#2b1f1f;border:1px solid #5d2b2b;padding:8px;border-radius:10px}
     .issue.ok{background:#1f2b21;border-color:#2b5d39}
   </style>
-
-  <!-- PDF.js dynamic loader with CDN fallbacks -->
-  <script>
-    window.__loadPDFJS = async function(){
-      if (window.pdfjsLib) return;
-
-      const cand = [
-        // cdnjs
-        { core: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js",
-          worker: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js" },
-        // jsDelivr
-        { core: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.js",
-          worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.js" },
-        // unpkg
-        { core: "https://unpkg.com/pdfjs-dist@4.5.136/build/pdf.min.js",
-          worker: "https://unpkg.com/pdfjs-dist@4.5.136/build/pdf.worker.min.js" },
-      ];
-
-      for (const c of cand){
-        try{
-          await new Promise((res, rej)=>{
-            const s = document.createElement('script');
-            s.src = c.core; s.defer = false;
-            s.onload = res; s.onerror = rej;
-            document.head.appendChild(s);
-          });
-          if (window.pdfjsLib){
-            try{
-              window.pdfjsLib.GlobalWorkerOptions.workerSrc = c.worker;
-            }catch{}
-            return;
-          }
-        }catch(e){
-          // try next candidate
-        }
-      }
-    };
-  </script>
-
-  <!-- OCR + XLSX libs -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -186,12 +144,12 @@
             <tbody id="scheduleBody"></tbody>
           </table>
         </div>
-        <div class="note">Tip: Press <kbd>S</kbd> for Stair bundle, <kbd>L</kbd> for Elevator bundle, <kbd>G</kbd> to toggle grid.</div>
+        <div class="note">Tip: Use the palette to drop presets fast. Double-click a pin to edit. Press <kbd>S</kbd> for Stair bundle, <kbd>L</kbd> for Elevator bundle, <kbd>G</kbd> to toggle grid.</div>
       </section>
     </main>
   </div>
 
-  <!-- Your app (awaits the PDF.js loader before use) -->
-  <script src="./app.js"></script>
+  <!-- Only your app script; it will self-load all libraries -->
+  <script defer src="./app.js"></script>
 </body>
 </html>
