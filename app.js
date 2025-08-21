@@ -1,69 +1,26 @@
-// Signage Message Scheduler — Two-file version
-// This script SELF-LOADS pdf.js, Tesseract, and XLSX from CDNs so order never breaks.
+// Signage Message Scheduler — two-file build (pdf.js v2 compatible)
 
 (() => {
   "use strict";
 
-  // ---------- CDN loaders (robust) ----------
-  const CDN = {
-    pdf: [
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js',
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.js'
-    ],
-    pdfWorker: [
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js',
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.js'
-    ],
-    tesseract: [
-      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-    ],
-    xlsx: [
-      'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
-    ],
+  // --- Quick diagnostics (shows on the page) ---
+  const diag = (msg) => {
+    const el = document.getElementById('diag');
+    if (el) el.textContent = (el.textContent ? el.textContent + '\n' : '') + msg;
+    console.log('[diag]', msg);
   };
 
-  function loadScript(src){
-    return new Promise((resolve, reject)=>{
-      const s=document.createElement('script');
-      s.src=src; s.async=true; s.crossOrigin="anonymous";
-      s.onload=()=>resolve(src);
-      s.onerror=()=>reject(new Error('Failed to load '+src));
-      document.head.appendChild(s);
-    });
-  }
-
-  async function ensurePdf(){
-    if (window.pdfjsLib) return window.pdfjsLib;
-    // Try both CDNs
-    let lastErr;
-    for (const src of CDN.pdf){
-      try { await loadScript(src); break; } catch(e){ lastErr=e; }
-    }
-    if (!window.pdfjsLib) throw lastErr || new Error('pdf.js failed to load');
-    // Set worker (works from either CDN)
-    const workerSrc = CDN.pdfWorker[0];
-    try{
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
-    }catch{}
-    return window.pdfjsLib;
-  }
-
-  async function ensureTesseract(){
-    if (window.Tesseract) return window.Tesseract;
-    await loadScript(CDN.tesseract[0]);
-    return window.Tesseract;
-  }
-
-  async function ensureXLSX(){
-    if (window.XLSX) return window.XLSX;
-    await loadScript(CDN.xlsx[0]);
-    return window.XLSX;
+  // Ensure pdf.js v2 (UMD) is ready
+  if (!window.pdfjsLib) {
+    alert('PDF engine failed to load. The page needs internet access to cdnjs.');
+  } else {
+    diag('pdfjsLib OK (v2 UMD).');
   }
 
   // ---------- helpers / store ----------
   const $  = (s, r=document)=>r.querySelector(s);
   const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
-  const storeKey = 'sms-projects-v2';
+  const storeKey = 'sms-projects-v2-umd';
   const load  = () => { try { return JSON.parse(localStorage.getItem(storeKey)) || [] } catch { return [] } };
   const save  = () => { localStorage.setItem(storeKey, JSON.stringify(projects)); renderProjects(); };
   const uuid  = ()=>'p-'+Math.random().toString(36).slice(2,9);
@@ -93,6 +50,7 @@
   $('#btnGenerate').onclick = generateSchedule;
   $('#btnScanAll').onclick  = scanAllPages;
   $('#btnScanPage').onclick = async ()=>{ await runOCRForPage(pageIndex); alert('OCR complete for this page. Click Generate.'); };
+  $('#btnLoadSample').onclick = loadSamplePdf;
 
   // Palette presets
   const PRESETS = [
@@ -159,26 +117,36 @@
 
       try{
         if (isPdf){
-          const pdfjsLib = await ensurePdf();
+          if (!window.pdfjsLib){ alert('PDF engine not loaded.'); return; }
           let pdf=null;
           try{
             const buf = await f.arrayBuffer();
             pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-          }catch{
+          }catch(err1){
+            diag('data load failed; trying blob URL');
             const url = URL.createObjectURL(f);
-            try{ pdf = await pdfjsLib.getDocument({ url }).promise; } finally { URL.revokeObjectURL(url); }
+            try{ pdf = await pdfjsLib.getDocument({ url }).promise; }
+            finally { URL.revokeObjectURL(url); }
           }
+          diag(`Opened PDF: ${f.name}, pages=${pdf.numPages}`);
           for (let i=1;i<=pdf.numPages;i++){
             const page = await pdf.getPage(i);
+            // downscale huge canvases to avoid memory errors
             const vp1 = page.getViewport({ scale: 1 });
             const MAX=2200;
             const scale=Math.min(1, MAX/Math.max(vp1.width,vp1.height));
             const vp = page.getViewport({ scale });
+
             const c=document.createElement('canvas'), cx=c.getContext('2d');
             c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
             await page.render({canvasContext: cx, viewport: vp}).promise;
             const dataUrl = c.toDataURL('image/png');
-            let txt=''; try{ const tc=await page.getTextContent(); txt=(tc.items||[]).map(it=>it.str).join('\n'); }catch{}
+
+            let txt=''; try{
+              const tc=await page.getTextContent();
+              txt=(tc.items||[]).map(it=>it.str).join('\n');
+            }catch{}
+
             p.pages.push({type:'image', name:`${f.name} — p${i}`, dataUrl, w:c.width, h:c.height, _pdfText:txt});
           }
         } else if (type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(name)){
@@ -195,6 +163,25 @@
     }
     save(); renderPages(); if (p.pages.length) openPage(0);
   });
+
+  // Load a known-good sample PDF (base64) to verify your browser + pdf.js
+  async function loadSamplePdf(){
+    const base64 = "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlIC9DYXRhbG9nL1BhZ2VzIDIgMCBSPj4KZW5kb2JqCjIgMCBvYmoKPDwvVHlwZSAvUGFnZXMvQ291bnQgMS9LaWRzIFszIDAgUl0+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlIC9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveCBbMCAwIDYxMiA3OTJdL0NvbnRlbnRzIDQgMCBSPj4KZW5kb2JqCjQgMCBvYmoKPDwvTGVuZ3RoIDMxPj4Kc3RyZWFtCkJUCi9GMSAyNCBUZgoxMDAgNzAwIFRkCihIZWxsbyBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDk1IDAwMDAwIG4gCjAwMDAwMDAxNzQgMDAwMDAgbiAKMDAwMDAwMDI3NiAwMDAwMCBuIAowMDAwMDAwMzYxIDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA2L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKNDAyCiUlRU9G";
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    if (!getProject()) createProject('Sample Project');
+    const p = getProject();
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    diag(`Sample PDF opened, pages=${pdf.numPages}`);
+    const page = await pdf.getPage(1);
+    const vp = page.getViewport({ scale: 1.5 });
+    const c = document.createElement('canvas');
+    const cx = c.getContext('2d');
+    c.width = vp.width; c.height = vp.height;
+    await page.render({ canvasContext: cx, viewport: vp }).promise;
+    const dataUrl = c.toDataURL('image/png');
+    p.pages.push({type:'image', name:'Sample — p1', dataUrl, w:c.width, h:c.height, _pdfText:'Hello PDF'});
+    save(); renderPages(); openPage(p.pages.length-1);
+  }
 
   function blobToDataURL(file){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); }) }
   function imageDims(src){ return new Promise(res=>{ const img=new Image(); img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight}); img.src=src; }) }
@@ -230,6 +217,8 @@
     const p=getProject(); p.pins.push({page:pageIndex,x:world.x,y:world.y,preset:activePreset.label,note:''}); save(); renderPins();
   });
 
+  window.addEventListener('resize', ()=>{ draw(); renderPins(); });
+
   function renderPins(){
     $$('.pin', stage).forEach(el=>el.remove());
     const p=getProject(); if(!p) return; const pins=p.pins.filter(x=>x.page===pageIndex);
@@ -254,7 +243,7 @@
     const p=getProject(); if(!p) return; const pg=p.pages[i]; if(!pg) return;
     const embedded = pg._pdfText || '';
     if (embedded.trim()){ ocrIndex[(p.id+':'+i)] = embedded; return 'pdf'; }
-    const Tesseract = await ensureTesseract();
+    if (!window.Tesseract){ alert('OCR engine not loaded.'); return; }
     const res = await Tesseract.recognize(pg.dataUrl, 'eng');
     ocrIndex[(p.id+':'+i)] = res.data.text || '';
     return 'ocr';
@@ -338,7 +327,7 @@
     $('#rowCount').textContent=`${p.schedule.length} rows`;
   }
   function exportCSV(project){ if(!project) return; const headers=['Sign Type','Room Number','Room Name','Building','Level','Notes']; const rows=project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes]); const csv=[headers,...rows].map(a=>a.map(v=>`"${(v||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(project.name||'schedule')+'.csv'; a.click(); URL.revokeObjectURL(url); }
-  async function exportXLSX(project){ if(!project) return; const XLSX = await ensureXLSX(); const ws_data=[['Sign Type','Room Number','Room Name','Building','Level','Notes'], ...project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes])]; const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(ws_data); XLSX.utils.book_append_sheet(wb,ws,'Schedule'); const out=XLSX.write(wb,{bookType:'xlsx',type:'array'}); const blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(getProject().name||'schedule')+'.xlsx'; a.click(); URL.revokeObjectURL(url); }
+  async function exportXLSX(project){ if(!project) return; if(!window.XLSX){ alert('XLSX engine not loaded.'); return; } const ws_data=[['Sign Type','Room Number','Room Name','Building','Level','Notes'], ...project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes])]; const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(ws_data); XLSX.utils.book_append_sheet(wb,ws,'Schedule'); const out=XLSX.write(wb,{bookType:'xlsx',type:'array'}); const blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(getProject().name||'schedule')+'.xlsx'; a.click(); URL.revokeObjectURL(url); }
 
   // ---------- Boot ----------
   function renderSettings(){ const p=getProject(); if(!p){ $('#building').value=''; $('#level').value=''; return } $('#building').value=p.building||''; $('#level').value=p.level||''; }
