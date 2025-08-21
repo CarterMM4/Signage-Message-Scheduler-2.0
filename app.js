@@ -1,14 +1,69 @@
-// Signage Message Scheduler — Single-file JS (no imports)
-// Works on GitHub Pages with PDF/Image upload, render to canvas, OCR fallback,
-// rules-based schedule generation, pins, CSV/XLSX export.
+// Signage Message Scheduler — Two-file version
+// This script SELF-LOADS pdf.js, Tesseract, and XLSX from CDNs so order never breaks.
 
 (() => {
   "use strict";
 
+  // ---------- CDN loaders (robust) ----------
+  const CDN = {
+    pdf: [
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js',
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.js'
+    ],
+    pdfWorker: [
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js',
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.js'
+    ],
+    tesseract: [
+      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+    ],
+    xlsx: [
+      'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
+    ],
+  };
+
+  function loadScript(src){
+    return new Promise((resolve, reject)=>{
+      const s=document.createElement('script');
+      s.src=src; s.async=true; s.crossOrigin="anonymous";
+      s.onload=()=>resolve(src);
+      s.onerror=()=>reject(new Error('Failed to load '+src));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function ensurePdf(){
+    if (window.pdfjsLib) return window.pdfjsLib;
+    // Try both CDNs
+    let lastErr;
+    for (const src of CDN.pdf){
+      try { await loadScript(src); break; } catch(e){ lastErr=e; }
+    }
+    if (!window.pdfjsLib) throw lastErr || new Error('pdf.js failed to load');
+    // Set worker (works from either CDN)
+    const workerSrc = CDN.pdfWorker[0];
+    try{
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+    }catch{}
+    return window.pdfjsLib;
+  }
+
+  async function ensureTesseract(){
+    if (window.Tesseract) return window.Tesseract;
+    await loadScript(CDN.tesseract[0]);
+    return window.Tesseract;
+  }
+
+  async function ensureXLSX(){
+    if (window.XLSX) return window.XLSX;
+    await loadScript(CDN.xlsx[0]);
+    return window.XLSX;
+  }
+
   // ---------- helpers / store ----------
   const $  = (s, r=document)=>r.querySelector(s);
   const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
-  const storeKey = 'sms-projects-v1';
+  const storeKey = 'sms-projects-v2';
   const load  = () => { try { return JSON.parse(localStorage.getItem(storeKey)) || [] } catch { return [] } };
   const save  = () => { localStorage.setItem(storeKey, JSON.stringify(projects)); renderProjects(); };
   const uuid  = ()=>'p-'+Math.random().toString(36).slice(2,9);
@@ -104,7 +159,7 @@
 
       try{
         if (isPdf){
-          if (!window.pdfjsLib){ alert('PDF engine not loaded.'); return; }
+          const pdfjsLib = await ensurePdf();
           let pdf=null;
           try{
             const buf = await f.arrayBuffer();
@@ -115,7 +170,6 @@
           }
           for (let i=1;i<=pdf.numPages;i++){
             const page = await pdf.getPage(i);
-            // downscale huge canvases to avoid memory errors
             const vp1 = page.getViewport({ scale: 1 });
             const MAX=2200;
             const scale=Math.min(1, MAX/Math.max(vp1.width,vp1.height));
@@ -200,6 +254,7 @@
     const p=getProject(); if(!p) return; const pg=p.pages[i]; if(!pg) return;
     const embedded = pg._pdfText || '';
     if (embedded.trim()){ ocrIndex[(p.id+':'+i)] = embedded; return 'pdf'; }
+    const Tesseract = await ensureTesseract();
     const res = await Tesseract.recognize(pg.dataUrl, 'eng');
     ocrIndex[(p.id+':'+i)] = res.data.text || '';
     return 'ocr';
@@ -283,9 +338,7 @@
     $('#rowCount').textContent=`${p.schedule.length} rows`;
   }
   function exportCSV(project){ if(!project) return; const headers=['Sign Type','Room Number','Room Name','Building','Level','Notes']; const rows=project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes]); const csv=[headers,...rows].map(a=>a.map(v=>`"${(v||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(project.name||'schedule')+'.csv'; a.click(); URL.revokeObjectURL(url); }
-  function exportXLSX(project){ if(!project) return; const ws_data=[['Sign Type','Room Number','Room Name','Building','Level','Notes'], ...project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes])]; const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(ws_data); XLSX.utils.book_append_sheet(wb,ws,'Schedule'); const out=XLSX.write(wb,{bookType:'xlsx',type:'array'}); const blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(getProject().name||'schedule')+'.xlsx'; a.click(); URL.revokeObjectURL(url); }
-  $('#btnExportCSV').onclick=()=>exportCSV(getProject());
-  $('#btnExportXLSX').onclick=()=>exportXLSX(getProject());
+  async function exportXLSX(project){ if(!project) return; const XLSX = await ensureXLSX(); const ws_data=[['Sign Type','Room Number','Room Name','Building','Level','Notes'], ...project.schedule.map(r=>[r.SignType,r.RoomNumber,r.RoomName,r.Building,r.Level,r.Notes])]; const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(ws_data); XLSX.utils.book_append_sheet(wb,ws,'Schedule'); const out=XLSX.write(wb,{bookType:'xlsx',type:'array'}); const blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=(getProject().name||'schedule')+'.xlsx'; a.click(); URL.revokeObjectURL(url); }
 
   // ---------- Boot ----------
   function renderSettings(){ const p=getProject(); if(!p){ $('#building').value=''; $('#level').value=''; return } $('#building').value=p.building||''; $('#level').value=p.level||''; }
@@ -293,4 +346,3 @@
   if(!getProject()) createProject('New Project'); else renderAll();
 
 })();
-
