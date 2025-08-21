@@ -1,1 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signage Message Scheduler</title>
+  <style>
+    :root{
+      --bg:#0b1020;--panel:#101732;--soft:#0d1533;--text:#e8ecf9;--muted:#a5b1d8;--line:#24315d;
+      --accent:#2ecc71;--accent-2:#44d983;--warn:#f59e0b;--err:#ef4444;
+    }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b1020,#0a0f1f 60%);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);background:rgba(16,23,50,.85);backdrop-filter: blur(6px);position:sticky;top:0;z-index:10}
+    .brand{display:flex;gap:10px;align-items:center}
+    .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+    .topbar h1{font-size:16px;margin:0;font-weight:600}
+    .actions{display:flex;gap:8px}
+    .btn{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:#31407d}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#0b1020;border:none}
+    .layout{display:grid;grid-template-columns:320px 1fr;min-height:calc(100vh - 54px)}
+    .left{border-right:1px solid var(--line);background:linear-gradient(180deg,#0c1230,#0c1030);overflow:auto}
+    .section{padding:12px;border-bottom:1px dashed var(--line)}
+    .section h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+    .input, select, textarea{width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:#0b1333;color:var(--text)}
+    .row{display:flex;gap:8px}.row>*{flex:1}
+    .list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto}
+    .item{padding:8px;border:1px solid var(--line);border-radius:10px;background:#0b1333;display:flex;align-items:center;justify-content:space-between}
+    .item small{color:var(--muted)}
+    .inline{display:flex;gap:8px;align-items:center}
+    .right{position:relative;display:grid;grid-template-rows:1fr 260px}
+    .viewer{position:relative;border-bottom:1px solid var(--line);background:#0a122a}
+    #stage{position:absolute;inset:0;overflow:hidden;cursor:grab;height:100%}
+    #stage.dragging{cursor:grabbing}
+    #pageCanvas{position:absolute;left:0;top:0;image-rendering:crisp-edges}
+    .pin{position:absolute;width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:var(--accent);box-shadow:0 0 0 2px rgba(0,0,0,.4);transform:translate(-50%,-100%)}
+    .pin::after{content:"";position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);width:2px;height:6px;background:#fff}
+    .toolbar{position:absolute;right:10px;top:10px;display:flex;gap:6px;z-index:5;flex-wrap:wrap}
+    .badge{font-size:11px;color:#0b1020;background:var(--accent);border-radius:999px;padding:4px 8px;font-weight:700}
+    .status{position:absolute;left:10px;top:10px;display:flex;gap:8px;align-items:center;z-index:5}
+    .tableWrap{max-height:230px; overflow:auto}
+    .footerBar{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px;border-top:1px solid var(--line);background:#0b1333}
+    .note{font-size:12px;color:var(--muted);padding:6px 10px}
+    .pill{padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+    .danger{background:linear-gradient(90deg,#ef4444,#f59e0b);color:white;border:none}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left}
+    th{position:sticky;top:0;background:#0b1333}
+    tbody tr:hover{background:#0f1942}
+    .issues{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto}
+    .issue{background:#2b1f1f;border:1px solid #5d2b2b;padding:8px;border-radius:10px}
+    .issue.ok{background:#1f2b21;border-color:#2b5d39}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span><h1>Signage Message Scheduler</h1></div>
+    <div class="actions">
+      <button class="btn" id="btnSave">Save</button>
+      <label class="btn">
+        <input type="file" id="fileInput" accept="application/pdf,.pdf,image/*" multiple hidden>
+        Upload Plan(s)
+      </label>
+      <button class="btn" id="btnScanPage">Scan This Page</button>
+      <button class="btn" id="btnScanAll">Scan All Pages</button>
+      <button class="btn primary" id="btnGenerate">Generate Schedule</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="left">
+      <section class="section">
+        <h2>Projects</h2>
+        <div class="row">
+          <input class="input" id="projectName" placeholder="New project name" />
+          <button class="btn" id="btnNew">Add</button>
+        </div>
+        <div id="projectList" class="list"></div>
+      </section>
+
+      <section class="section">
+        <h2>Settings</h2>
+        <div class="row">
+          <input class="input" id="building" placeholder="Building (e.g., B1)" />
+          <input class="input" id="level" placeholder="Level (e.g., 1)" />
+        </div>
+        <div class="row" style="margin-top:8px">
+          <select id="rulePreset" class="input">
+            <option value="southwood">Southwood Default Rules</option>
+            <option value="basic">Basic (generic)</option>
+          </select>
+          <button class="btn" id="btnExportXLSX">Export XLSX</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Pages</h2>
+        <div id="pageList" class="list"></div>
+      </section>
+
+      <section class="section">
+        <h2>Validation</h2>
+        <div id="issues" class="issues"></div>
+      </section>
+    </aside>
+
+    <main class="right">
+      <div class="viewer">
+        <div class="status">
+          <span class="badge" id="zoomBadge">100%</span>
+          <span class="pill" id="pageBadge">—</span>
+          <span class="pill" id="scaleBadge">Scale: not set</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="btnZoomOut">−</button>
+          <button class="btn" id="btnZoomIn">+</button>
+          <button class="btn" id="btnToggleGrid">Grid</button>
+          <button class="btn" id="btnScale">Set Scale</button>
+          <div class="inline" id="pinPalette"></div>
+          <button class="btn" id="btnClearPins">Clear Pins</button>
+        </div>
+        <div id="stage">
+          <canvas id="pageCanvas"></canvas>
+        </div>
+      </div>
+
+      <section class="schedule">
+        <div class="footerBar">
+          <div class="inline"><strong>Schedule</strong> <span class="pill" id="rowCount">0 rows</span></div>
+          <div class="inline">
+            <button class="btn" id="btnAddRow">Add Row</button>
+            <button class="btn" id="btnExportCSV">Export CSV</button>
+            <button class="btn" id="btnExportXLSX2">Export XLSX</button>
+            <button class="btn danger" id="btnClearSchedule">Clear</button>
+          </div>
+        </div>
+        <div class="tableWrap">
+          <table>
+            <thead><tr>
+              <th>Sign Type</th><th>Room Number</th><th>Room Name</th>
+              <th>Building</th><th>Level</th><th>Notes</th><th></th>
+            </tr></thead>
+            <tbody id="scheduleBody"></tbody>
+          </table>
+        </div>
+        <div class="note">Tip: Use the palette to drop presets fast. Double-click a pin to edit. Press <kbd>S</kbd> for Stair bundle, <kbd>L</kbd> for Elevator bundle, <kbd>G</kbd> to toggle grid.</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Libraries (CDN) — load BEFORE app.js -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.worker.min.js";
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Your app code -->
+  <script src="./app.js"></script>
+</body>
+</html>
 
